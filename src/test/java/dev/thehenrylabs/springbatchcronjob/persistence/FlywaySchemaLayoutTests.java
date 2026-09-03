@@ -47,6 +47,22 @@ class FlywaySchemaLayoutTests {
 	}
 
 	@Test
+	void batchTablesAreInsideBatchSchema() {
+		Integer count = jdbcTemplate.queryForObject(
+				"SELECT count(*) FROM information_schema.tables WHERE table_schema = 'batch' AND LOWER(table_name) = "
+						+ "'batch_job_instance'",
+				Integer.class);
+		assertThat(count).isEqualTo(1);
+	}
+
+	@Test
+	void controlTablesAreInsideControlSchema() {
+		List<String> tables = jdbcTemplate.queryForList(
+				"SELECT lower(table_name) FROM information_schema.tables WHERE table_schema = 'control'", String.class);
+		assertThat(tables).contains("batch_file_manifest", "batch_run_summary");
+	}
+
+	@Test
 	void quartzTablesAreVisibleThroughSearchPath() {
 		// The runtime search_path (batch, quartz, control) must make unqualified
 		// framework queries resolve; the app datasource never qualifies QRTZ_*.
@@ -63,10 +79,11 @@ class FlywaySchemaLayoutTests {
 		List<Map<String, Object>> versions = jdbcTemplate.queryForList("""
 				SELECT version, success
 				FROM batch.flyway_schema_history
-				WHERE version IS NOT NULL AND success = true
+				WHERE version IS NOT NULL
 				""");
-		// One row per SQL migration (V001, V002).
-		assertThat(versions).hasSize(2);
+		// At least the V001-V007 SQL migrations; all of them must be successful.
+		assertThat(versions).hasSizeGreaterThanOrEqualTo(6);
+		assertThat(versions).allSatisfy(row -> assertThat(row.get("success")).isEqualTo(true));
 	}
 
 }
