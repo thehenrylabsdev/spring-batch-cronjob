@@ -46,10 +46,14 @@ public class WeeklyCsvScheduleFactory implements ApplicationRunner {
 
 	private final BatchLaunchService launchService;
 
-	public WeeklyCsvScheduleFactory(Scheduler scheduler, BatchProperties properties, BatchLaunchService launchService) {
+	private final dev.thehenrylabs.springbatchcronjob.observability.BatchMetrics metrics;
+
+	public WeeklyCsvScheduleFactory(Scheduler scheduler, BatchProperties properties, BatchLaunchService launchService,
+			dev.thehenrylabs.springbatchcronjob.observability.BatchMetrics metrics) {
 		this.scheduler = scheduler;
 		this.properties = properties;
 		this.launchService = launchService;
+		this.metrics = metrics;
 	}
 
 	@Override
@@ -61,6 +65,7 @@ public class WeeklyCsvScheduleFactory implements ApplicationRunner {
 		ZoneId zone = ZoneId.of(this.properties.schedule().zone());
 		this.scheduler.getContext().put(WeeklyCsvQuartzJob.LAUNCHER_KEY, this.launchService);
 		this.scheduler.getContext().put(WeeklyCsvQuartzJob.ZONE_KEY, zone.getId());
+		this.scheduler.getListenerManager().addTriggerListener(triggerMetrics());
 		registerIfAbsent(zone);
 	}
 
@@ -93,6 +98,25 @@ public class WeeklyCsvScheduleFactory implements ApplicationRunner {
 
 	static TriggerKey triggerKey() {
 		return TriggerKey.triggerKey(WeeklyCsvQuartzJob.JOB_NAME, WeeklyCsvQuartzJob.JOB_GROUP);
+	}
+
+	private org.quartz.listeners.TriggerListenerSupport triggerMetrics() {
+		return new org.quartz.listeners.TriggerListenerSupport() {
+			@Override
+			public String getName() {
+				return "batchMetrics";
+			}
+
+			@Override
+			public void triggerFired(org.quartz.Trigger trigger, org.quartz.JobExecutionContext context) {
+				WeeklyCsvScheduleFactory.this.metrics.quartzTriggerFired();
+			}
+
+			@Override
+			public void triggerMisfired(org.quartz.Trigger trigger) {
+				WeeklyCsvScheduleFactory.this.metrics.quartzTriggerMisfire();
+			}
+		};
 	}
 
 	/**

@@ -91,6 +91,8 @@ batch:
   processing:
     chunk-size: 2000
     skip-limit: 10000
+    progress-log-records: 250000
+    progress-log-interval-seconds: 60
     executor:
       core-pool-size: 8
       max-pool-size: 8

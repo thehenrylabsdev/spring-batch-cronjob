@@ -32,6 +32,22 @@ public class ClassificationMetricsWriter implements ItemWriter<ProcessingResult>
 
 	private final Map<ProcessingStatus, LongAdder> counters = new ConcurrentHashMap<>();
 
+	private final dev.thehenrylabs.springbatchcronjob.observability.BatchMetrics metrics;
+
+	private final dev.thehenrylabs.springbatchcronjob.configuration.BatchProperties properties;
+
+	private volatile java.time.Instant stepStartedAt;
+
+	private volatile long lastProgressRecords;
+
+	private volatile long lastProgressAtNanos;
+
+	public ClassificationMetricsWriter(dev.thehenrylabs.springbatchcronjob.observability.BatchMetrics metrics,
+			dev.thehenrylabs.springbatchcronjob.configuration.BatchProperties properties) {
+		this.metrics = metrics;
+		this.properties = properties;
+	}
+
 	/**
 	 * Satisfies both {@link ItemWriter#write} and {@link ProcessingResultSink#write}: the
 	 * counting writer IS the V1 downstream sink (SPEC 26); a broker-backed sink can
@@ -39,9 +55,11 @@ public class ClassificationMetricsWriter implements ItemWriter<ProcessingResult>
 	 */
 	@Override
 	public void write(Chunk<? extends ProcessingResult> results) {
+		long started = System.nanoTime();
 		for (ProcessingResult result : results) {
 			this.counters.computeIfAbsent(result.status(), ignored -> new LongAdder()).increment();
 		}
+		this.metrics.writeLatency((System.nanoTime() - started) / Math.max(1, results.size()));
 	}
 
 	/**
@@ -52,6 +70,37 @@ public class ClassificationMetricsWriter implements ItemWriter<ProcessingResult>
 	@Override
 	public void update(ExecutionContext executionContext) {
 		executionContext.put(KEY_STATUS_COUNTS, snapshot());
+		progress();
+	}
+
+	/** Marks the step start (from ProcessingStepListener) for progress rate math. */
+	public void markStepStarted() {
+		this.stepStartedAt = java.time.Instant.now();
+		this.lastProgressAtNanos = System.nanoTime();
+		this.lastProgressRecords = 0;
+	}
+
+	private void progress() {
+		long total = total();
+		long now = System.nanoTime();
+		java.time.Instant started = this.stepStartedAt;
+		if (started == null) {
+			return;
+		}
+		long elapsedSeconds = Math.max(1, java.time.Duration.between(started, java.time.Instant.now()).toSeconds());
+		long sinceLast = total - this.lastProgressRecords;
+		long sinceLastNanos = now - this.lastProgressAtNanos;
+		double rate = sinceLast * 1_000_000_000d / Math.max(1L, sinceLastNanos);
+		this.metrics.updateRecordsPerSecond(rate);
+		boolean byRecords = sinceLast >= this.properties.processing().progressLogRecords();
+		boolean byInterval = sinceLastNanos >= this.properties.processing().progressLogIntervalSeconds()
+				* 1_000_000_000L;
+		if (byRecords || byInterval) {
+			log.info("Progress recordsProcessed={} rate={}/s elapsed={}s", total, String.format("%.0f", rate),
+					elapsedSeconds);
+			this.lastProgressRecords = total;
+			this.lastProgressAtNanos = now;
+		}
 	}
 
 	@Override

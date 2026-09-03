@@ -54,6 +54,10 @@ public class BatchConfiguration {
 
 	private final WeeklyBatchJobListener jobListener;
 
+	private final dev.thehenrylabs.springbatchcronjob.observability.BatchLoggingListener batchLoggingListener;
+
+	private final dev.thehenrylabs.springbatchcronjob.observability.BatchTracingListener batchTracingListener;
+
 	private final ThreadPoolTaskExecutor batchProcessingExecutor;
 
 	public BatchConfiguration(JobRepository jobRepository, PlatformTransactionManager transactionManager,
@@ -62,6 +66,8 @@ public class BatchConfiguration {
 			CsvRecordProcessor csvRecordProcessor, ClassificationMetricsWriter metricsWriter,
 			ProcessingStepListener processingStepListener, ReconciliationTasklet reconciliationTasklet,
 			FinalizeBatchTasklet finalizeBatchTasklet, WeeklyBatchJobListener jobListener,
+			dev.thehenrylabs.springbatchcronjob.observability.BatchLoggingListener batchLoggingListener,
+			dev.thehenrylabs.springbatchcronjob.observability.BatchTracingListener batchTracingListener,
 			ThreadPoolTaskExecutor batchProcessingExecutor) {
 		this.jobRepository = jobRepository;
 		this.transactionManager = transactionManager;
@@ -75,6 +81,8 @@ public class BatchConfiguration {
 		this.reconciliationTasklet = reconciliationTasklet;
 		this.finalizeBatchTasklet = finalizeBatchTasklet;
 		this.jobListener = jobListener;
+		this.batchLoggingListener = batchLoggingListener;
+		this.batchTracingListener = batchTracingListener;
 		this.batchProcessingExecutor = batchProcessingExecutor;
 	}
 
@@ -86,6 +94,8 @@ public class BatchConfiguration {
 			.next(reconcileStep())
 			.next(finalizeStep())
 			.listener(this.jobListener)
+			.listener(this.batchLoggingListener)
+			.listener(this.batchTracingListener)
 			.build();
 	}
 

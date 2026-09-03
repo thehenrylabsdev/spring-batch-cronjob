@@ -33,7 +33,8 @@ public record BatchProperties(Schedule schedule, Input input, Processing process
 	}
 
 	/** Chunk-oriented processing settings (SPEC 21, 28, 36). */
-	public record Processing(int chunkSize, int skipLimit, Executor executor, Partitioning partitioning) {
+	public record Processing(int chunkSize, int skipLimit, int progressLogRecords, int progressLogIntervalSeconds,
+			Executor executor, Partitioning partitioning) {
 
 		/** Bounded dedicated batch executor (SPEC 29). */
 		public record Executor(int corePoolSize, int maxPoolSize, int queueCapacity) {

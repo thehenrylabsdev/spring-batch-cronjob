@@ -15,13 +15,22 @@ public class CsvRecordProcessor implements ItemProcessor<CustomerCsvRecord, Proc
 
 	private final CustomerRecordClassifier classifier;
 
-	public CsvRecordProcessor(CustomerRecordClassifier classifier) {
+	private final dev.thehenrylabs.springbatchcronjob.observability.BatchMetrics metrics;
+
+	public CsvRecordProcessor(CustomerRecordClassifier classifier,
+			dev.thehenrylabs.springbatchcronjob.observability.BatchMetrics metrics) {
 		this.classifier = classifier;
+		this.metrics = metrics;
 	}
 
 	@Override
 	public ProcessingResult process(CustomerCsvRecord record) {
-		return this.classifier.classify(record);
+		long started = System.nanoTime();
+		ProcessingResult result = this.classifier.classify(record);
+		this.metrics.processLatency(System.nanoTime() - started);
+		this.metrics.recordProcessed();
+		this.metrics.recordResult(result.status());
+		return result;
 	}
 
 }

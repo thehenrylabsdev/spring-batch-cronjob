@@ -46,6 +46,8 @@ public class CsvRecordReader implements ItemReader<CustomerCsvRecord>, ItemStrea
 
 	private final RecordBoundaryFailureInjector failureInjector;
 
+	private final dev.thehenrylabs.springbatchcronjob.observability.BatchMetrics metrics;
+
 	private CsvParser parser;
 
 	private InputStream input;
@@ -55,9 +57,11 @@ public class CsvRecordReader implements ItemReader<CustomerCsvRecord>, ItemStrea
 	private long emittedRecords;
 
 	public CsvRecordReader(BatchProperties properties,
-			org.springframework.beans.factory.ObjectProvider<RecordBoundaryFailureInjector> failureInjector) {
+			org.springframework.beans.factory.ObjectProvider<RecordBoundaryFailureInjector> failureInjector,
+			dev.thehenrylabs.springbatchcronjob.observability.BatchMetrics metrics) {
 		this.properties = properties;
 		this.failureInjector = failureInjector.getIfAvailable(RecordBoundaryFailureInjector.Noop::new);
+		this.metrics = metrics;
 	}
 
 	@Override
@@ -134,6 +138,7 @@ public class CsvRecordReader implements ItemReader<CustomerCsvRecord>, ItemStrea
 		}
 		this.emittedRecords++;
 		this.failureInjector.maybeThrow(this.emittedRecords);
+		this.metrics.recordRead();
 		if (row.length != this.header.length) {
 			throw new CsvRecordParseException("CSV record " + this.emittedRecords + " has " + row.length
 					+ " columns, expected " + this.header.length);

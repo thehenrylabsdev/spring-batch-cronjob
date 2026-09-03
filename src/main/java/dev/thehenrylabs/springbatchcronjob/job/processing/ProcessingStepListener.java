@@ -42,6 +42,7 @@ public class ProcessingStepListener implements StepExecutionListener {
 
 		this.metricsWriter.reset();
 		this.metricsWriter.restore(stepExecution.getExecutionContext());
+		this.metricsWriter.markStepStarted();
 	}
 
 }

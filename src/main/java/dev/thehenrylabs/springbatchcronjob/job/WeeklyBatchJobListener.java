@@ -24,12 +24,31 @@ public class WeeklyBatchJobListener implements JobExecutionListener {
 
 	private final FileManifestService manifestService;
 
-	public WeeklyBatchJobListener(FileManifestService manifestService) {
+	private final dev.thehenrylabs.springbatchcronjob.observability.BatchMetrics metrics;
+
+	public WeeklyBatchJobListener(FileManifestService manifestService,
+			dev.thehenrylabs.springbatchcronjob.observability.BatchMetrics metrics) {
 		this.manifestService = manifestService;
+		this.metrics = metrics;
+	}
+
+	@Override
+	public void beforeJob(JobExecution jobExecution) {
+		this.metrics.jobStarted();
 	}
 
 	@Override
 	public void afterJob(JobExecution jobExecution) {
+		if (jobExecution.getStatus() == BatchStatus.FAILED) {
+			this.metrics.jobFailed();
+		}
+		else if (jobExecution.getStatus() == BatchStatus.COMPLETED) {
+			this.metrics.jobCompleted();
+		}
+		if (jobExecution.getStartTime() != null && jobExecution.getEndTime() != null) {
+			this.metrics.jobDurationNanos(
+					java.time.Duration.between(jobExecution.getStartTime(), jobExecution.getEndTime()).toNanos());
+		}
 		if (jobExecution.getStatus() != BatchStatus.FAILED) {
 			return;
 		}
