@@ -96,11 +96,16 @@ public class FileManifestService {
 		return guard(id, ManifestStatus.READY, transition(id, ManifestStatus.VALIDATING, ManifestStatus.READY));
 	}
 
-	@Transactional
+	@Transactional(propagation = Propagation.REQUIRES_NEW)
 	public BatchFileManifest transitionToProcessing(Long id) {
 		Instant now = this.clock.instant();
 		int rows = this.repository.transitionToProcessing(id, ManifestStatus.READY.name(),
 				ManifestStatus.PROCESSING.name(), now, now);
+		if (rows == 0) {
+			// Crash + restart: the failed manifest becomes PROCESSING again.
+			rows = this.repository.transitionToProcessingFromAny(id, ManifestStatus.PROCESSING.name(),
+					List.of(ManifestStatus.FAILED.name()), now);
+		}
 		return guard(id, ManifestStatus.PROCESSING, rows);
 	}
 

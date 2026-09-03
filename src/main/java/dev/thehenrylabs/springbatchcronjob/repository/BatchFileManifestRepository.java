@@ -54,6 +54,15 @@ public interface BatchFileManifestRepository extends CrudRepository<BatchFileMan
 			""")
 	int transitionFromAny(Long id, String to, List<String> fromStates, Instant at);
 
+	/** Retry-safe processing start (crash + restart resumes a FAILED manifest). */
+	@Modifying
+	@Query("""
+			UPDATE control.batch_file_manifest
+			SET status = :to, updated_at = :at, processing_started_at = :at
+			WHERE id = :id AND status IN (:fromStates)
+			""")
+	int transitionToProcessingFromAny(Long id, String to, List<String> fromStates, Instant at);
+
 	@Modifying
 	@Query("""
 			UPDATE control.batch_file_manifest

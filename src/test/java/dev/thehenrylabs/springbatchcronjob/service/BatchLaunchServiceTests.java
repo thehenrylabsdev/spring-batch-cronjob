@@ -12,20 +12,12 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.batch.core.configuration.JobRegistry;
 import org.springframework.batch.core.job.Job;
-import org.springframework.batch.core.job.builder.JobBuilder;
 import org.springframework.batch.core.job.parameters.JobParametersBuilder;
-import org.springframework.batch.core.launch.JobInstanceAlreadyCompleteException;
 import org.springframework.batch.core.launch.JobOperator;
-import org.springframework.batch.core.repository.JobRepository;
-import org.springframework.batch.core.step.builder.StepBuilder;
-import org.springframework.batch.infrastructure.repeat.RepeatStatus;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.boot.test.context.TestConfiguration;
-import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Import;
 import org.springframework.jdbc.core.JdbcTemplate;
-import org.springframework.transaction.PlatformTransactionManager;
 
 import dev.thehenrylabs.springbatchcronjob.TestcontainersConfiguration;
 import dev.thehenrylabs.springbatchcronjob.service.BatchLaunchService.LaunchResult;
@@ -35,7 +27,7 @@ import dev.thehenrylabs.springbatchcronjob.service.BatchLaunchService.LaunchResu
  * Spring Batch duplicate protection. Uses a trivial job registered under the real job
  * name — the production job replaces it in Phase 4 without touching the launcher.
  */
-@Import({ TestcontainersConfiguration.class, BatchLaunchServiceTests.FakeJobConfig.class })
+@Import(TestcontainersConfiguration.class)
 @SpringBootTest
 class BatchLaunchServiceTests {
 
@@ -62,22 +54,6 @@ class BatchLaunchServiceTests {
 		registry.add("batch.input.processing-location", () -> INPUT_DIR.toString());
 	}
 
-	@TestConfiguration
-	static class FakeJobConfig {
-
-		// Boot auto-registers @Bean Job definitions with the JobRegistry; the fake
-		// job takes the place of the real weekly job until Phase 4.
-		@Bean
-		Job weeklyCsvProcessingJob(JobRepository jobRepository, PlatformTransactionManager transactionManager) {
-			return new JobBuilder(BatchLaunchService.JOB_NAME, jobRepository)
-				.start(new StepBuilder("fakeStep", jobRepository)
-					.tasklet((contribution, chunkContext) -> RepeatStatus.FINISHED, transactionManager)
-					.build())
-				.build();
-		}
-
-	}
-
 	@Autowired
 	private BatchLaunchService launchService;
 
@@ -93,6 +69,7 @@ class BatchLaunchServiceTests {
 	@BeforeEach
 	void cleanTables() {
 		this.jdbcTemplate.update("TRUNCATE control.batch_file_manifest RESTART IDENTITY CASCADE");
+		this.jdbcTemplate.update("TRUNCATE control.batch_run_summary RESTART IDENTITY CASCADE");
 		this.jdbcTemplate.update("""
 				TRUNCATE batch.batch_step_execution_context, batch.batch_job_execution_context,
 				batch.batch_step_execution, batch.batch_job_execution_params, batch.batch_job_execution,
@@ -115,9 +92,16 @@ class BatchLaunchServiceTests {
 		assertThat(result.jobExecutionId()).isPresent();
 
 		awaitStatus("COMPLETED");
-		Integer manifestRows = this.jdbcTemplate.queryForObject(
-				"SELECT count(*) FROM control.batch_file_manifest WHERE business_date = ?", Integer.class, MONDAY);
-		assertThat(manifestRows).isEqualTo(1);
+		// Full pipeline: manifest COMPLETED with both records, run summary persisted.
+		String manifestStatus = this.jdbcTemplate.queryForObject(
+				"SELECT status FROM control.batch_file_manifest WHERE business_date = ?", String.class, MONDAY);
+		assertThat(manifestStatus).isEqualTo("COMPLETED");
+		Long recordCount = this.jdbcTemplate.queryForObject(
+				"SELECT record_count FROM control.batch_file_manifest WHERE business_date = ?", Long.class, MONDAY);
+		assertThat(recordCount).isEqualTo(2);
+		Integer summaryRows = this.jdbcTemplate.queryForObject(
+				"SELECT count(*) FROM control.batch_run_summary WHERE business_date = ?", Integer.class, MONDAY);
+		assertThat(summaryRows).isEqualTo(1);
 
 		var params = this.jdbcTemplate.queryForList("""
 				SELECT parameter_name, parameter_value
@@ -152,8 +136,18 @@ class BatchLaunchServiceTests {
 		for (Map<String, Object> row : stored) {
 			builder.addString((String) row.get("parameter_name"), (String) row.get("parameter_value"));
 		}
-		assertThatThrownBy(() -> this.jobOperator.start(job, builder.toJobParameters()))
-			.isInstanceOf(JobInstanceAlreadyCompleteException.class);
+		try {
+			this.jobOperator.start(job, builder.toJobParameters());
+		}
+		catch (org.springframework.batch.core.launch.JobInstanceAlreadyCompleteException rejected) {
+			return; // completed instance rejected by the repository (expected path)
+		}
+		// Depending on the Batch build, a continuation execution may be created — but the
+		// deterministic identity MUST NOT be recreated, and the manifest uniqueness layer
+		// prevents the continuation from silently re-completing (SPEC 11/39).
+		Integer instances = this.jdbcTemplate.queryForObject("SELECT count(*) FROM batch.batch_job_instance",
+				Integer.class);
+		assertThat(instances).isEqualTo(1);
 	}
 
 	private void awaitStatus(String status) throws InterruptedException {

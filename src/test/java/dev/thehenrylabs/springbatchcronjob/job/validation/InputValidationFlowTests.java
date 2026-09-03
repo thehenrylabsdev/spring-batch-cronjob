@@ -10,20 +10,13 @@ import java.time.LocalDate;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.batch.core.configuration.JobRegistry;
-import org.springframework.batch.core.job.Job;
-import org.springframework.batch.core.job.builder.JobBuilder;
 import org.springframework.batch.core.launch.JobOperator;
-import org.springframework.batch.core.repository.JobRepository;
-import org.springframework.batch.core.step.builder.StepBuilder;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.boot.test.context.TestConfiguration;
-import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Import;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
-import org.springframework.transaction.PlatformTransactionManager;
 
 import dev.thehenrylabs.springbatchcronjob.TestcontainersConfiguration;
 import dev.thehenrylabs.springbatchcronjob.exception.InvalidInputFileException;
@@ -35,7 +28,7 @@ import dev.thehenrylabs.springbatchcronjob.service.BatchLaunchService;
  * Batch step against Testcontainers PostgreSQL — valid file, invalid header, missing
  * manifest, empty file, and the immutable copy rule.
  */
-@Import({ TestcontainersConfiguration.class, InputValidationFlowTests.ValidationJobConfig.class })
+@Import(TestcontainersConfiguration.class)
 @SpringBootTest
 class InputValidationFlowTests {
 
@@ -55,19 +48,6 @@ class InputValidationFlowTests {
 	static void inputProperties(DynamicPropertyRegistry registry) {
 		registry.add("batch.input.location", () -> INPUT_DIR.toString());
 		registry.add("batch.input.processing-location", () -> PROCESSING_DIR.toString());
-	}
-
-	@TestConfiguration
-	static class ValidationJobConfig {
-
-		@Bean
-		Job weeklyCsvProcessingJob(JobRepository jobRepository, PlatformTransactionManager transactionManager,
-				InputValidationTasklet tasklet) {
-			return new JobBuilder(BatchLaunchService.JOB_NAME, jobRepository)
-				.start(new StepBuilder("validateInputStep", jobRepository).tasklet(tasklet, transactionManager).build())
-				.build();
-		}
-
 	}
 
 	@Autowired
@@ -105,8 +85,12 @@ class InputValidationFlowTests {
 		assertThat(result.outcome()).isEqualTo(BatchLaunchService.Outcome.STARTED);
 		awaitJobStatus("COMPLETED");
 
+		// Full pipeline: validation passed, processing + reconcile + finalize completed.
 		String status = manifestStatus(WEEK_1);
-		assertThat(status).isEqualTo("READY");
+		assertThat(status).isEqualTo("COMPLETED");
+		Long recordCount = this.jdbcTemplate.queryForObject(
+				"SELECT record_count FROM control.batch_file_manifest WHERE business_date = ?", Long.class, WEEK_1);
+		assertThat(recordCount).isEqualTo(2);
 
 		// Immutable content-addressed copy installed; incoming file consumed.
 		Path copy = onlyFileIn(PROCESSING_DIR);
