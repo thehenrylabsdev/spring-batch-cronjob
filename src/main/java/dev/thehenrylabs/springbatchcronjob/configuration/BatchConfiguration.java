@@ -7,7 +7,7 @@ import org.springframework.batch.core.step.Step;
 import org.springframework.batch.core.step.builder.StepBuilder;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
-import org.springframework.dao.DataAccessException;
+import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
 import org.springframework.transaction.PlatformTransactionManager;
 
 import dev.thehenrylabs.springbatchcronjob.job.WeeklyBatchJobListener;
@@ -54,12 +54,15 @@ public class BatchConfiguration {
 
 	private final WeeklyBatchJobListener jobListener;
 
+	private final ThreadPoolTaskExecutor batchProcessingExecutor;
+
 	public BatchConfiguration(JobRepository jobRepository, PlatformTransactionManager transactionManager,
 			BatchProperties properties, InputValidationTasklet validationTasklet,
 			ReferenceDataLoader referenceDataLoader, CsvRecordReader csvRecordReader,
 			CsvRecordProcessor csvRecordProcessor, ClassificationMetricsWriter metricsWriter,
 			ProcessingStepListener processingStepListener, ReconciliationTasklet reconciliationTasklet,
-			FinalizeBatchTasklet finalizeBatchTasklet, WeeklyBatchJobListener jobListener) {
+			FinalizeBatchTasklet finalizeBatchTasklet, WeeklyBatchJobListener jobListener,
+			ThreadPoolTaskExecutor batchProcessingExecutor) {
 		this.jobRepository = jobRepository;
 		this.transactionManager = transactionManager;
 		this.properties = properties;
@@ -72,6 +75,7 @@ public class BatchConfiguration {
 		this.reconciliationTasklet = reconciliationTasklet;
 		this.finalizeBatchTasklet = finalizeBatchTasklet;
 		this.jobListener = jobListener;
+		this.batchProcessingExecutor = batchProcessingExecutor;
 	}
 
 	@Bean
@@ -110,6 +114,7 @@ public class BatchConfiguration {
 			.stream(this.csvRecordReader)
 			.stream(this.metricsWriter)
 			.listener(this.processingStepListener)
+			.taskExecutor(this.batchProcessingExecutor)
 			.faultTolerant()
 			.skipLimit(processing.skipLimit())
 			.skipPolicy(new org.springframework.batch.core.step.skip.LimitCheckingExceptionHierarchySkipPolicy(
