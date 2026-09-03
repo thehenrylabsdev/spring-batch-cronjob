@@ -1,0 +1,12 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: batch-app-config
+  namespace: batch
+data:
+  SPRING_DATASOURCE_URL: jdbc:postgresql://postgres.batch.svc:5432/batchdb
+  SPRING_APPLICATION_NAME: spring-batch-cronjob
+  # Actuator exposure is cluster-internal (SPEC 49) — do not expose externally.
+  MANAGEMENT_ENDPOINTS_WEB_EXPOSURE_INCLUDE: health,info,metrics,prometheus,quartz
+  BATCH_SCHEDULE_ZONE: Asia/Ho_Chi_Minh
+  BATCH_PROFILE_ACTIVE: k8s

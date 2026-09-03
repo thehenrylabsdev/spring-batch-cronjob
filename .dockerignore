@@ -1,0 +1,8 @@
+target
+.git
+.idea
+*.iml
+data
+jfr
+gc
+docs

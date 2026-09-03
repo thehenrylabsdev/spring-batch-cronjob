@@ -1,0 +1,95 @@
+# batch-scheduler-app — two replicas sharing one PostgreSQL (SPEC 51).
+# Placeholder values MUST be replaced using load-test evidence (SPEC 52).
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: batch-scheduler-app
+  namespace: batch
+  labels:
+    app: batch-scheduler-app
+spec:
+  replicas: 2
+  strategy:
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  selector:
+    matchLabels:
+      app: batch-scheduler-app
+  template:
+    metadata:
+      labels:
+        app: batch-scheduler-app
+    spec:
+      terminationGracePeriodSeconds: 120  # must exceed worst-case chunk commit (SPEC 53)
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                labelSelector:
+                  matchLabels:
+                    app: batch-scheduler-app
+                topologyKey: kubernetes.io/hostname
+      containers:
+        - name: batch-scheduler-app
+          image: registry.example.com/batch/spring-batch-cronjob:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8080
+          envFrom:
+            - configMapRef:
+                name: batch-app-config
+            - secretRef:
+                name: batch-db-secret
+          resources:
+            requests:
+              cpu: "2"
+              memory: "2Gi"
+            limits:
+              cpu: "4"
+              memory: "4Gi"
+          securityContext:
+            readOnlyRootFilesystem: true
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+          # Input/processing volumes (read-only input, writable processing dir)
+          volumeMounts:
+            - name: input-volume
+              mountPath: /data/incoming
+              readOnly: true
+            - name: processing-volume
+              mountPath: /data/processing
+            - name: tmp
+              mountPath: /tmp
+          readinessProbe:
+            httpGet:
+              path: /actuator/health/readiness
+              port: http
+            initialDelaySeconds: 20
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /actuator/health/liveness
+              port: http
+            initialDelaySeconds: 30
+            periodSeconds: 15
+            # liveness does NOT depend on DB — avoids restart storms (SPEC 49)
+      volumes:
+        - name: input-volume
+          persistentVolumeClaim:
+            claimName: batch-input-pvc
+        - name: processing-volume
+          persistentVolumeClaim:
+            claimName: batch-processing-pvc
+        - name: tmp
+          emptyDir: {}
