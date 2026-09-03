@@ -1,3 +1,104 @@
 spring:
   application:
     name: spring-batch-cronjob
+
+  datasource:
+    url: jdbc:postgresql://localhost:5432/mydatabase
+    username: myuser
+    password: secret
+    hikari:
+      # Route unqualified table names across the three dedicated schemas (SPEC 16):
+      # batch.BATCH_* (Spring Batch), quartz.QRTZ_* (Quartz), control.* (application).
+      connection-init-sql: SET search_path TO batch, quartz, control
+
+  flyway:
+    # Flyway owns the three dedicated schemas (creates them when missing) and keeps
+    # its history table in the batch schema. Each migration file also sets its own
+    # search_path so vendor DDL lands in the right schema (SPEC 17).
+    schemas: batch, quartz, control
+    default-schema: batch
+
+  batch:
+    # Job beans are launched only by Quartz; never at startup (SPEC FR-002).
+    job:
+      enabled: false
+    jdbc:
+      # Production uses Flyway-managed DDL (SPEC 17, AC-017).
+      initialize-schema: never
+      table-prefix: BATCH_
+
+  quartz:
+    job-store-type: jdbc
+    jdbc:
+      initialize-schema: never
+    properties:
+      org.quartz.scheduler.instanceId: AUTO
+      org.quartz.scheduler.instanceName: WeeklyCsvScheduler
+      org.quartz.jobStore.isClustered: "true"
+      org.quartz.jobStore.tablePrefix: QRTZ_
+      org.quartz.jobStore.driverDelegateClass: org.quartz.impl.jdbcjobstore.PostgreSQLDelegate
+      org.quartz.jobStore.clusterCheckinInterval: "15000"
+      org.quartz.threadPool.threadCount: "2"
+
+  lifecycle:
+    # Leave room for one chunk transaction plus Spring Batch state persistence on SIGTERM (SPEC 53).
+    timeout-per-shutdown-phase: 90s
+
+server:
+  shutdown: graceful
+
+management:
+  endpoints:
+    web:
+      # /actuator/quartz aids the operations runbook (SPEC 49). Exposure follows
+      # cluster security policy; the app is cluster-internal only.
+      exposure:
+        include: health,info,metrics,prometheus,quartz
+  endpoint:
+    health:
+      probes:
+        enabled: true
+
+logging:
+  structured:
+    format:
+      ecs: true
+
+batch:
+  schedule:
+    enabled: true
+    cron: "0 0 6 ? * MON"
+    zone: "Asia/Ho_Chi_Minh"
+    misfire-policy: FIRE_ONCE_NOW
+
+  input:
+    location: "/data/incoming"
+    expected-header:
+      - customer_id
+      - field_a
+      - field_b
+      - amount
+      - event_date
+    expected-delimiter: ","
+    expected-encoding: "UTF-8"
+    file-name-pattern: "^customers[._-][0-9]{8}.*\\.csv$"
+    min-size-bytes: 1
+    max-size-bytes: 21474836480
+    expected-checksum: ""
+
+  processing:
+    chunk-size: 2000
+    skip-limit: 10000
+    executor:
+      core-pool-size: 8
+      max-pool-size: 8
+      queue-capacity: 16
+    partitioning:
+      mode: SINGLE_READER
+      grid-size: 8
+
+  retry:
+    max-attempts: 3
+    initial-backoff: 500ms
+    multiplier: 2.0
+    max-backoff: 5s
