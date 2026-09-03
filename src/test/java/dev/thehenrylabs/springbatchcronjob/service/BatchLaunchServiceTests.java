@@ -58,6 +58,8 @@ class BatchLaunchServiceTests {
 	@org.springframework.test.context.DynamicPropertySource
 	static void inputLocation(org.springframework.test.context.DynamicPropertyRegistry registry) {
 		registry.add("batch.input.location", () -> INPUT_DIR.toString());
+		// Same directory: the immutable-copy move is a no-op in launcher-only tests.
+		registry.add("batch.input.processing-location", () -> INPUT_DIR.toString());
 	}
 
 	@TestConfiguration

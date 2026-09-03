@@ -80,13 +80,18 @@ public class FileManifestService {
 		return this.repository.save(discovery);
 	}
 
-	@Transactional
+	@Transactional(propagation = Propagation.REQUIRES_NEW)
 	public BatchFileManifest transitionToValidating(Long id) {
-		return guard(id, ManifestStatus.VALIDATING,
-				transition(id, ManifestStatus.DISCOVERED, ManifestStatus.VALIDATING));
+		int rows = transition(id, ManifestStatus.DISCOVERED, ManifestStatus.VALIDATING);
+		if (rows == 0) {
+			// Restart after a validation failure: the FAILED row becomes retryable.
+			rows = this.repository.transitionFromAny(id, ManifestStatus.VALIDATING.name(),
+					List.of(ManifestStatus.FAILED.name()), this.clock.instant());
+		}
+		return guard(id, ManifestStatus.VALIDATING, rows);
 	}
 
-	@Transactional
+	@Transactional(propagation = Propagation.REQUIRES_NEW)
 	public BatchFileManifest transitionToReady(Long id) {
 		return guard(id, ManifestStatus.READY, transition(id, ManifestStatus.VALIDATING, ManifestStatus.READY));
 	}
@@ -107,7 +112,7 @@ public class FileManifestService {
 		return guard(id, ManifestStatus.COMPLETED, rows);
 	}
 
-	@Transactional
+	@Transactional(propagation = Propagation.REQUIRES_NEW)
 	public BatchFileManifest transitionToFailed(Long id) {
 		Instant now = this.clock.instant();
 		// A failure can emerge from the validation phase (VALIDATING, READY) or from
@@ -135,6 +140,11 @@ public class FileManifestService {
 
 	public Optional<BatchFileManifest> find(Long id) {
 		return this.repository.findById(id);
+	}
+
+	/** Look up the manifest by its deterministic identity (SPEC 11). */
+	public Optional<BatchFileManifest> findByIdentity(LocalDate businessDate, String checksumSha256) {
+		return this.repository.findByBusinessDateAndChecksumSha256(businessDate, checksumSha256);
 	}
 
 	public List<BatchFileManifest> findForBusinessDate(LocalDate businessDate) {

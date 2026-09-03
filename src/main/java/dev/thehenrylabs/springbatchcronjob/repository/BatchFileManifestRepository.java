@@ -45,6 +45,15 @@ public interface BatchFileManifestRepository extends CrudRepository<BatchFileMan
 			""")
 	int transitionToProcessing(Long id, String from, String to, Instant at, Instant processingStartedAt);
 
+	/** Retry-safe transition from any of the supplied predecessor states. */
+	@Modifying
+	@Query("""
+			UPDATE control.batch_file_manifest
+			SET status = :to, updated_at = :at
+			WHERE id = :id AND status IN (:fromStates)
+			""")
+	int transitionFromAny(Long id, String to, List<String> fromStates, Instant at);
+
 	@Modifying
 	@Query("""
 			UPDATE control.batch_file_manifest

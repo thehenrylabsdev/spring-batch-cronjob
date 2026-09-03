@@ -22,6 +22,7 @@ import dev.thehenrylabs.springbatchcronjob.configuration.BatchProperties;
 import dev.thehenrylabs.springbatchcronjob.exception.BatchInvariantException;
 import dev.thehenrylabs.springbatchcronjob.exception.InvalidInputFileException;
 import dev.thehenrylabs.springbatchcronjob.file.FileChecksumService;
+import dev.thehenrylabs.springbatchcronjob.file.ImmutableInputService;
 import dev.thehenrylabs.springbatchcronjob.file.InputFileResolver;
 import dev.thehenrylabs.springbatchcronjob.file.ResolvedInputFile;
 import io.micrometer.core.instrument.MeterRegistry;
@@ -58,18 +59,21 @@ public class BatchLaunchService {
 
 	private final FileChecksumService checksumService;
 
+	private final ImmutableInputService immutableInput;
+
 	private final MeterRegistry meterRegistry;
 
 	private final BatchProperties properties;
 
 	public BatchLaunchService(JobOperator jobOperator, JobRegistry jobRegistry, InputFileResolver inputFileResolver,
-			FileManifestService manifestService, FileChecksumService checksumService, MeterRegistry meterRegistry,
-			BatchProperties properties) {
+			FileManifestService manifestService, FileChecksumService checksumService,
+			ImmutableInputService immutableInput, MeterRegistry meterRegistry, BatchProperties properties) {
 		this.jobOperator = jobOperator;
 		this.jobRegistry = jobRegistry;
 		this.inputFileResolver = inputFileResolver;
 		this.manifestService = manifestService;
 		this.checksumService = checksumService;
+		this.immutableInput = immutableInput;
 		this.meterRegistry = meterRegistry;
 		this.properties = properties;
 	}
@@ -91,9 +95,10 @@ public class BatchLaunchService {
 	public LaunchResult launchWeekly(LocalDate businessDate) {
 		ResolvedInputFile input = this.inputFileResolver.resolve(businessDate);
 		String checksum = resolveChecksum(input);
+		ResolvedInputFile processing = this.immutableInput.installForProcessing(input, checksum);
 
 		FileManifestService.Registration registration = this.manifestService.registerDiscovered(businessDate,
-				input.fileName(), input.uri(), input.sizeBytes(), checksum);
+				processing.fileName(), processing.uri(), processing.sizeBytes(), checksum);
 		if (registration.duplicate()) {
 			duplicate("duplicate manifest identity " + businessDate + "/" + checksum);
 			return new LaunchResult(Outcome.DUPLICATE_MANIFEST, Optional.empty(),
@@ -101,7 +106,7 @@ public class BatchLaunchService {
 		}
 		JobParameters parameters = new JobParametersBuilder().addString(PARAM_BUSINESS_DATE, businessDate.toString())
 			.addString(PARAM_FILE_CHECKSUM, checksum)
-			.addString(PARAM_FILE_URI, input.uri().toString())
+			.addString(PARAM_FILE_URI, processing.uri().toString())
 			.toJobParameters();
 
 		log.info("Launching weekly CSV job businessDate={} file={} checksum={}", businessDate, input.fileName(),
@@ -138,15 +143,28 @@ public class BatchLaunchService {
 	 * The checksum is computed exactly once per logical file, at the ingestion boundary
 	 * (this launcher), never inside the processing job (SPEC 19). Assigning the checksum
 	 * before launching keeps the Spring Batch identity deterministic.
+	 *
+	 * <p>
+	 * When {@code batch.input.expected-checksum} is configured it is still computed and
+	 * verified — a tampered file must not sail under a producer-claimed digest.
 	 */
 	private String resolveChecksum(ResolvedInputFile input) {
 		String configured = this.properties.input().expectedChecksum();
 		if (configured != null && !configured.isBlank()) {
-			return configured.toLowerCase();
+			String actual = computeChecksum(input);
+			if (!actual.equalsIgnoreCase(configured)) {
+				throw new InvalidInputFileException("Input checksum mismatch: expected " + configured + " but was "
+						+ actual + " for " + input.uri());
+			}
+			return actual;
 		}
 		if (input.checksum() != null && !input.checksum().isBlank()) {
 			return input.checksum().toLowerCase();
 		}
+		return computeChecksum(input);
+	}
+
+	private String computeChecksum(ResolvedInputFile input) {
 		URI uri = input.uri();
 		if ("file".equals(uri.getScheme())) {
 			return this.checksumService.sha256(Path.of(uri));

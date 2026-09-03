@@ -73,6 +73,8 @@ batch:
 
   input:
     location: "/data/incoming"
+    # Content-addressed destination for the immutable copy (SPEC 14); blank = no move.
+    processing-location: "/data/processing"
     expected-header:
       - customer_id
       - field_a
