@@ -65,7 +65,7 @@ public class DistributedPartitionRepository {
 	public int start(long id, String worker, long version, Instant expires, Instant now) {
 		return fenced(
 				"UPDATE control.batch_partition SET status='RUNNING',lease_expires_at=:expires,updated_at=:now WHERE "
-						+ where(),
+						+ runningWhere(),
 				id, worker, version, now, expires);
 	}
 
@@ -120,6 +120,16 @@ public class DistributedPartitionRepository {
 				java.util.Map.of("execution", executionId), this::map);
 	}
 
+	/**
+	 * Partition definitions belong to the file manifest and survive coordinator
+	 * executions.
+	 */
+	public List<BatchPartition> forManifest(long manifestId) {
+		return this.jdbc.query(
+				"SELECT * FROM control.batch_partition WHERE manifest_id=:manifest ORDER BY partition_no",
+				java.util.Map.of("manifest", manifestId), this::map);
+	}
+
 	public void create(long manifestId, long executionId,
 			List<dev.thehenrylabs.springbatchcronjob.partition.CsvPartitionDefinition> definitions, Instant now) {
 		for (dev.thehenrylabs.springbatchcronjob.partition.CsvPartitionDefinition definition : definitions) {
@@ -151,6 +161,10 @@ public class DistributedPartitionRepository {
 
 	private static String where() {
 		return "id=:id AND worker_id=:worker AND lease_version=:version AND status IN ('CLAIMED','RUNNING')";
+	}
+
+	private static String runningWhere() {
+		return "id=:id AND worker_id=:worker AND lease_version=:version AND status='RUNNING'";
 	}
 
 	private static MapSqlParameterSource fencedArgs(long id, String worker, long version, Instant now) {

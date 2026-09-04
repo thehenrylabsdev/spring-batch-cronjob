@@ -64,10 +64,12 @@ public class DistributedWorkerPollingService implements SmartLifecycle {
 		if (!this.distributed.enabled() || this.running)
 			return;
 		this.running = true;
-		this.executor = Executors
-			.newSingleThreadScheduledExecutor(Thread.ofPlatform().name("partition-worker-", 0).factory());
-		this.executor.scheduleWithFixedDelay(this::pollSafely, 0,
-				this.distributed.worker().idlePollInterval().toMillis(), TimeUnit.MILLISECONDS);
+		this.executor = Executors.newScheduledThreadPool(this.distributed.worker().concurrency(),
+				Thread.ofPlatform().name("partition-worker-", 0).factory());
+		for (int slot = 0; slot < this.distributed.worker().concurrency(); slot++) {
+			this.executor.scheduleWithFixedDelay(this::pollSafely, 0,
+					this.distributed.worker().idlePollInterval().toMillis(), TimeUnit.MILLISECONDS);
+		}
 	}
 
 	@Override

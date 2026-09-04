@@ -58,12 +58,11 @@ public class DistributedProcessingManagerTasklet implements Tasklet {
 		if (manifest.status() == dev.thehenrylabs.springbatchcronjob.domain.ManifestStatus.READY)
 			this.manifests.transitionToProcessing(manifest.id());
 		Instant withoutWorkersSince = null;
-		long executionId = context.getStepContext().getStepExecution().getJobExecutionId();
 		while (true) {
 			this.leases.reapExpired();
-			List<BatchPartition> rows = this.partitions.forExecution(executionId);
+			List<BatchPartition> rows = this.partitions.forManifest(manifest.id());
 			if (rows.isEmpty())
-				throw new BatchInvariantException("No partitions persisted for coordinator execution " + executionId);
+				throw new BatchInvariantException("No partitions persisted for manifest " + manifest.id());
 			if (rows.stream().allMatch(row -> row.status() == PartitionStatus.COMPLETED))
 				return RepeatStatus.FINISHED;
 			if (rows.stream()

@@ -39,7 +39,12 @@ public class DistributedReconciliationTasklet implements Tasklet {
 	@Override
 	public RepeatStatus execute(StepContribution contribution, ChunkContext context) {
 		long executionId = context.getStepContext().getStepExecution().getJobExecutionId();
-		List<BatchPartition> rows = this.partitions.forExecution(executionId);
+		var params = context.getStepContext().getStepExecution().getJobParameters();
+		var manifest = this.manifests
+			.findByIdentity(LocalDate.parse(params.getString(BatchLaunchService.PARAM_BUSINESS_DATE)),
+					params.getString(BatchLaunchService.PARAM_FILE_CHECKSUM))
+			.orElseThrow();
+		List<BatchPartition> rows = this.partitions.forManifest(manifest.id());
 		if (rows.isEmpty() || rows.stream().anyMatch(p -> p.status() != PartitionStatus.COMPLETED))
 			throw new BatchInvariantException("Not all partitions completed");
 		long records = 0, bytes = -1, recordCursor = 0;
@@ -52,11 +57,6 @@ public class DistributedReconciliationTasklet implements Tasklet {
 			recordCursor = p.endRecordNoExclusive();
 			records += p.expectedRecordCount();
 		}
-		var params = context.getStepContext().getStepExecution().getJobParameters();
-		var manifest = this.manifests
-			.findByIdentity(LocalDate.parse(params.getString(BatchLaunchService.PARAM_BUSINESS_DATE)),
-					params.getString(BatchLaunchService.PARAM_FILE_CHECKSUM))
-			.orElseThrow();
 		if (manifest.fileSizeBytes() != bytes || manifest.expectedRecordCount() == null
 				|| manifest.expectedRecordCount() != records)
 			throw new BatchInvariantException("Global distributed reconciliation failed");
