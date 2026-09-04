@@ -61,9 +61,9 @@ public class PartitionLeaseService {
 	}
 
 	public void checkpoint(BatchPartition partition, long byteOffset, long recordNo, long read, long processed,
-			long accepted, long rejected, long invalid) {
+			long accepted, long rejected, long invalid, long skipped) {
 		guard(partition.id(), this.partitions.checkpoint(partition.id(), partition.workerId(), partition.leaseVersion(),
-				byteOffset, recordNo, read, processed, accepted, rejected, invalid, this.clock.instant()));
+				byteOffset, recordNo, read, processed, accepted, rejected, invalid, skipped, this.clock.instant()));
 	}
 
 	public void complete(BatchPartition partition) {

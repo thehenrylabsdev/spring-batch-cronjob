@@ -248,4 +248,4 @@ More background is available in [SPEC_02.md](SPEC_02.md), [architecture decision
 
 ## License
 
-No license has been selected yet. Add an explicit license before accepting outside contributions or reuse.
+This project is licensed under the [Apache License 2.0](LICENSE).

@@ -65,7 +65,7 @@ public class DistributedPartitionRepository {
 	public int start(long id, String worker, long version, Instant expires, Instant now) {
 		return fenced(
 				"UPDATE control.batch_partition SET status='RUNNING',lease_expires_at=:expires,updated_at=:now WHERE "
-						+ runningWhere(),
+						+ where(),
 				id, worker, version, now, expires);
 	}
 
@@ -75,12 +75,12 @@ public class DistributedPartitionRepository {
 	}
 
 	public int checkpoint(long id, String worker, long version, long byteOffset, long recordNo, long read,
-			long processed, long accepted, long rejected, long invalid, Instant now) {
+			long processed, long accepted, long rejected, long invalid, long skipped, Instant now) {
 		return this.jdbc.update(
 				"""
 						UPDATE control.batch_partition SET checkpoint_byte=:byte,checkpoint_record_no=:record,committed_read_count=:read,
 						committed_processed_count=:processed,accepted_count=:accepted,rejected_count=:rejected,invalid_count=:invalid,
-						updated_at=:now WHERE id=:id AND worker_id=:worker AND lease_version=:version AND status='RUNNING'
+						skipped_count=:skipped,updated_at=:now WHERE id=:id AND worker_id=:worker AND lease_version=:version AND status='RUNNING'
 						""",
 				fencedArgs(id, worker, version, now).addValue("byte", byteOffset)
 					.addValue("record", recordNo)
@@ -88,13 +88,14 @@ public class DistributedPartitionRepository {
 					.addValue("processed", processed)
 					.addValue("accepted", accepted)
 					.addValue("rejected", rejected)
-					.addValue("invalid", invalid));
+					.addValue("invalid", invalid)
+					.addValue("skipped", skipped));
 	}
 
 	public int complete(long id, String worker, long version, Instant now) {
 		return fenced(
 				"UPDATE control.batch_partition SET status='COMPLETED',completed_at=:now,lease_expires_at=NULL,updated_at=:now WHERE "
-						+ where(),
+						+ runningWhere(),
 				id, worker, version, now, null);
 	}
 
@@ -187,7 +188,7 @@ public class DistributedPartitionRepository {
 				rs.getTimestamp("lease_expires_at") == null ? null : rs.getTimestamp("lease_expires_at").toInstant(),
 				rs.getLong("checkpoint_byte"), rs.getLong("checkpoint_record_no"), rs.getLong("committed_read_count"),
 				rs.getLong("committed_processed_count"), rs.getLong("accepted_count"), rs.getLong("rejected_count"),
-				rs.getLong("invalid_count"), rs.getInt("attempt_count"));
+				rs.getLong("invalid_count"), rs.getLong("skipped_count"), rs.getInt("attempt_count"));
 	}
 
 }

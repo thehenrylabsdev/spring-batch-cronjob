@@ -63,11 +63,12 @@ public class DistributedReconciliationTasklet implements Tasklet {
 		long accepted = rows.stream().mapToLong(BatchPartition::acceptedCount).sum();
 		long rejected = rows.stream().mapToLong(BatchPartition::rejectedCount).sum();
 		long invalid = rows.stream().mapToLong(BatchPartition::invalidCount).sum();
+		long skipped = rows.stream().mapToLong(BatchPartition::skippedCount).sum();
 		String runId = Long.toString(executionId);
 		if (this.summaries.findByRunId(runId).isEmpty()) {
 			var now = java.time.Instant.now();
 			this.summaries.save(new BatchRunSummary(null, runId, manifest.businessDate(), manifest.checksumSha256(),
-					records, accepted, rejected, invalid, 0, now, now, 0L, RunSummaryStatus.COMPLETED, now, now));
+					records, accepted, rejected, invalid, skipped, now, now, 0L, RunSummaryStatus.COMPLETED, now, now));
 		}
 		return RepeatStatus.FINISHED;
 	}

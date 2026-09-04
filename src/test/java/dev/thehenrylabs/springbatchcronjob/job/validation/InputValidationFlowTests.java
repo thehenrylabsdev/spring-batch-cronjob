@@ -26,7 +26,7 @@ import dev.thehenrylabs.springbatchcronjob.service.BatchLaunchService;
 /**
  * Phase-3 tests (SPEC 61.3 + Phase-3 list): the validation tasklet through a real Spring
  * Batch step against Testcontainers PostgreSQL — valid file, invalid header, missing
- * manifest, empty file, and the immutable copy rule.
+ * manifest, empty file, and immutable source identity.
  */
 @Import(TestcontainersConfiguration.class)
 @SpringBootTest
@@ -78,7 +78,7 @@ class InputValidationFlowTests {
 	}
 
 	@Test
-	void validFileReachesReadyViaImmutableCopy() throws Exception {
+	void validFileCompletesWithStableSourceIdentity() throws Exception {
 		createInput(WEEK_1, VALID_HEADER + "\nU001,a,b,10.50,2026-08-31\nU002,c,d,20.00,2026-09-01\n");
 
 		BatchLaunchService.LaunchResult result = this.launchService.launchWeekly(WEEK_1);
@@ -92,11 +92,14 @@ class InputValidationFlowTests {
 				"SELECT record_count FROM control.batch_file_manifest WHERE business_date = ?", Long.class, WEEK_1);
 		assertThat(recordCount).isEqualTo(2);
 
-		// Immutable content-addressed copy installed; incoming file consumed.
-		Path copy = onlyFileIn(PROCESSING_DIR);
-		assertThat(copy.getFileName().toString()).startsWith("customers-").endsWith(".csv");
-		assertThat(this.checksumService.sha256(copy)).hasSize(64);
-		assertThat(Files.exists(fileFor(WEEK_1, INPUT_DIR))).isFalse();
+		// Distributed workers read the manifest's stable shared URI; the source is not
+		// moved into a pod-local processing directory.
+		Path source = fileFor(WEEK_1, INPUT_DIR);
+		assertThat(this.checksumService.sha256(source)).hasSize(64);
+		assertThat(Files.exists(source)).isTrue();
+		assertThat(this.jdbcTemplate.queryForObject(
+				"SELECT file_uri FROM control.batch_file_manifest WHERE business_date = ?", String.class, WEEK_1))
+			.isEqualTo(source.toUri().toString());
 	}
 
 	@Test
@@ -168,12 +171,6 @@ class InputValidationFlowTests {
 	private static Path fileFor(LocalDate businessDate, Path dir) {
 		return dir.resolve(
 				"customers-" + businessDate.format(java.time.format.DateTimeFormatter.ofPattern("yyyyMMdd")) + ".csv");
-	}
-
-	private static Path onlyFileIn(Path dir) throws Exception {
-		try (var stream = Files.list(dir)) {
-			return stream.findFirst().orElseThrow(() -> new AssertionError("no file in " + dir));
-		}
 	}
 
 	private static void createInput(LocalDate businessDate, String content) throws Exception {

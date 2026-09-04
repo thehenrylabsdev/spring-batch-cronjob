@@ -7,5 +7,5 @@ public record BatchPartition(long id, long manifestId, long jobExecutionId, Long
 		int partitionNo, long startByte, long endByteExclusive, long startRecordNo, long endRecordNoExclusive,
 		long expectedRecordCount, PartitionStatus status, String workerId, long leaseVersion, Instant leaseExpiresAt,
 		long checkpointByte, long checkpointRecordNo, long committedReadCount, long committedProcessedCount,
-		long acceptedCount, long rejectedCount, long invalidCount, int attemptCount) {
+		long acceptedCount, long rejectedCount, long invalidCount, long skippedCount, int attemptCount) {
 }

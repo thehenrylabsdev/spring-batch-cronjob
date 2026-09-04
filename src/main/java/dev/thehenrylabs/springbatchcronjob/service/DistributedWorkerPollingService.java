@@ -9,6 +9,8 @@ import java.util.concurrent.TimeUnit;
 
 import org.springframework.context.SmartLifecycle;
 import org.springframework.stereotype.Component;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import dev.thehenrylabs.springbatchcronjob.configuration.BatchProperties;
 import dev.thehenrylabs.springbatchcronjob.configuration.DistributedBatchProperties;
@@ -28,6 +30,8 @@ import dev.thehenrylabs.springbatchcronjob.repository.BatchFileManifestRepositor
  */
 @Component
 public class DistributedWorkerPollingService implements SmartLifecycle {
+
+	private static final Logger log = LoggerFactory.getLogger(DistributedWorkerPollingService.class);
 
 	private final PartitionLeaseService leases;
 
@@ -93,7 +97,8 @@ public class DistributedWorkerPollingService implements SmartLifecycle {
 		try {
 			poll();
 		}
-		catch (RuntimeException ignored) {
+		catch (RuntimeException e) {
+			log.warn("Distributed worker poll failed; work will be retried or fenced", e);
 			this.lifecycle.idle();
 		}
 	}
@@ -116,6 +121,7 @@ public class DistributedWorkerPollingService implements SmartLifecycle {
 			long accepted = partition.acceptedCount();
 			long rejected = partition.rejectedCount();
 			long invalid = partition.invalidCount();
+			long skipped = partition.skippedCount();
 			ByteRangeCsvItemReader reader = new ByteRangeCsvItemReader(file, partition.checkpointByte(),
 					partition.checkpointRecordNo(), partition.endByteExclusive());
 			reader.open(new org.springframework.batch.infrastructure.item.ExecutionContext());
@@ -130,15 +136,16 @@ public class DistributedWorkerPollingService implements SmartLifecycle {
 					switch (result.status()) {
 						case ACCEPTED -> accepted++;
 						case INVALID -> invalid++;
+						case SKIPPED -> skipped++;
 						default -> rejected++;
 					}
 					if (inChunk >= this.batch.processing().chunkSize()) {
-						checkpoint(partition, reader, read, processed, accepted, rejected, invalid);
+						checkpoint(partition, reader, read, processed, accepted, rejected, invalid, skipped);
 						this.leases.renew(partition);
 						inChunk = 0;
 					}
 				}
-				checkpoint(partition, reader, read, processed, accepted, rejected, invalid);
+				checkpoint(partition, reader, read, processed, accepted, rejected, invalid, skipped);
 				if (processed != partition.expectedRecordCount())
 					throw new BatchInvariantException("Partition count does not reconcile: " + partition.id());
 				verifyUnchanged(manifest, file);
@@ -162,9 +169,9 @@ public class DistributedWorkerPollingService implements SmartLifecycle {
 	}
 
 	private void checkpoint(BatchPartition partition, ByteRangeCsvItemReader reader, long read, long processed,
-			long accepted, long rejected, long invalid) {
+			long accepted, long rejected, long invalid, long skipped) {
 		this.leases.checkpoint(partition, reader.nextByteOffset(), reader.nextRecordNumber(), read, processed, accepted,
-				rejected, invalid);
+				rejected, invalid, skipped);
 	}
 
 	private static void verifyUnchanged(BatchFileManifest manifest, Path file) {
