@@ -9,4 +9,8 @@ data:
   # Actuator exposure is cluster-internal (SPEC 49) — do not expose externally.
   MANAGEMENT_ENDPOINTS_WEB_EXPOSURE_INCLUDE: health,info,metrics,prometheus,quartz
   BATCH_SCHEDULE_ZONE: Asia/Ho_Chi_Minh
+  BATCH_INPUT_RESOURCE: file:/data/weekly/weekly.csv
+  BATCH_DISTRIBUTED_ENABLED: "true"
+  BATCH_WORKER_CONCURRENCY: "1"
+  BATCH_MAX_PODS: "20"
   BATCH_PROFILE_ACTIVE: k8s

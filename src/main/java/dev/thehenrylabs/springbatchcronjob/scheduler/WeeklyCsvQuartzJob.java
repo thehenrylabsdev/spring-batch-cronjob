@@ -28,9 +28,9 @@ import dev.thehenrylabs.springbatchcronjob.service.BatchLaunchService;
 public class WeeklyCsvQuartzJob implements Job {
 
 	/** Job key used in the durable Quartz JobStore. */
-	public static final String JOB_NAME = "weeklyCsvProcessing";
+	public static final String JOB_NAME = "weekly-csv-coordinator";
 
-	public static final String JOB_GROUP = "weekly";
+	public static final String JOB_GROUP = "weekly-batch";
 
 	/** Scheduler context key for the launch delegate. */
 	public static final String LAUNCHER_KEY = WeeklyCsvQuartzJob.class.getName() + ".launcher";

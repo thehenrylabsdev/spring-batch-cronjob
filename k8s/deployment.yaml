@@ -50,6 +50,19 @@ spec:
                 name: batch-app-config
             - secretRef:
                 name: batch-db-secret
+          env:
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: POD_UID
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.uid
+            - name: POD_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
           resources:
             requests:
               cpu: "2"
@@ -64,6 +77,9 @@ spec:
               drop: ["ALL"]
           # Input/processing volumes (read-only input, writable processing dir)
           volumeMounts:
+            - name: weekly-input
+              mountPath: /data/weekly
+              readOnly: true
             - name: input-volume
               mountPath: /data/incoming
               readOnly: true
@@ -85,6 +101,9 @@ spec:
             periodSeconds: 15
             # liveness does NOT depend on DB — avoids restart storms (SPEC 49)
       volumes:
+        - name: weekly-input
+          persistentVolumeClaim:
+            claimName: weekly-input-pvc
         - name: input-volume
           persistentVolumeClaim:
             claimName: batch-input-pvc

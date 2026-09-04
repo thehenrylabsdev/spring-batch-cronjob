@@ -7,145 +7,72 @@ import org.springframework.batch.core.step.Step;
 import org.springframework.batch.core.step.builder.StepBuilder;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
-import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
 import org.springframework.transaction.PlatformTransactionManager;
 
 import dev.thehenrylabs.springbatchcronjob.job.WeeklyBatchJobListener;
-import dev.thehenrylabs.springbatchcronjob.job.finalize.FinalizeBatchTasklet;
-import dev.thehenrylabs.springbatchcronjob.job.processing.ClassificationMetricsWriter;
-import dev.thehenrylabs.springbatchcronjob.job.processing.CsvRecordParseException;
-import dev.thehenrylabs.springbatchcronjob.job.processing.CsvRecordProcessor;
-import dev.thehenrylabs.springbatchcronjob.job.processing.CsvRecordReader;
-import dev.thehenrylabs.springbatchcronjob.job.processing.ProcessingStepListener;
-import dev.thehenrylabs.springbatchcronjob.job.reconciliation.ReconciliationTasklet;
+import dev.thehenrylabs.springbatchcronjob.job.coordinator.DistributedFinalizeTasklet;
+import dev.thehenrylabs.springbatchcronjob.job.coordinator.DistributedProcessingManagerTasklet;
+import dev.thehenrylabs.springbatchcronjob.job.coordinator.DistributedReconciliationTasklet;
+import dev.thehenrylabs.springbatchcronjob.job.coordinator.IndexAndCreatePartitionsTasklet;
 import dev.thehenrylabs.springbatchcronjob.job.reference.ReferenceDataLoader;
 import dev.thehenrylabs.springbatchcronjob.job.validation.InputValidationTasklet;
 import dev.thehenrylabs.springbatchcronjob.service.BatchLaunchService;
 
 /**
- * weeklyCsvProcessingJob (SPEC 18): validate -> reference -> process -> reconcile ->
- * finalize. Chunk-oriented, fault-tolerant, restart-safe. The job is launched ONLY by
- * BatchLaunchService (spring.batch.job.enabled=false).
+ * Coordinator topology. Workers run independently on every pod from durable partition
+ * rows.
  */
 @Configuration(proxyBeanMethods = false)
 public class BatchConfiguration {
 
-	private final JobRepository jobRepository;
+	private final JobRepository repository;
 
-	private final PlatformTransactionManager transactionManager;
+	private final PlatformTransactionManager transactions;
 
-	private final BatchProperties properties;
+	private final InputValidationTasklet validate;
 
-	private final InputValidationTasklet validationTasklet;
+	private final ReferenceDataLoader reference;
 
-	private final ReferenceDataLoader referenceDataLoader;
+	private final IndexAndCreatePartitionsTasklet index;
 
-	private final CsvRecordReader csvRecordReader;
+	private final DistributedProcessingManagerTasklet manager;
 
-	private final CsvRecordProcessor csvRecordProcessor;
+	private final DistributedReconciliationTasklet reconcile;
 
-	private final ClassificationMetricsWriter metricsWriter;
+	private final DistributedFinalizeTasklet finalize;
 
-	private final ProcessingStepListener processingStepListener;
+	private final WeeklyBatchJobListener listener;
 
-	private final ReconciliationTasklet reconciliationTasklet;
-
-	private final FinalizeBatchTasklet finalizeBatchTasklet;
-
-	private final WeeklyBatchJobListener jobListener;
-
-	private final dev.thehenrylabs.springbatchcronjob.observability.BatchLoggingListener batchLoggingListener;
-
-	private final dev.thehenrylabs.springbatchcronjob.observability.BatchTracingListener batchTracingListener;
-
-	private final ThreadPoolTaskExecutor batchProcessingExecutor;
-
-	public BatchConfiguration(JobRepository jobRepository, PlatformTransactionManager transactionManager,
-			BatchProperties properties, InputValidationTasklet validationTasklet,
-			ReferenceDataLoader referenceDataLoader, CsvRecordReader csvRecordReader,
-			CsvRecordProcessor csvRecordProcessor, ClassificationMetricsWriter metricsWriter,
-			ProcessingStepListener processingStepListener, ReconciliationTasklet reconciliationTasklet,
-			FinalizeBatchTasklet finalizeBatchTasklet, WeeklyBatchJobListener jobListener,
-			dev.thehenrylabs.springbatchcronjob.observability.BatchLoggingListener batchLoggingListener,
-			dev.thehenrylabs.springbatchcronjob.observability.BatchTracingListener batchTracingListener,
-			ThreadPoolTaskExecutor batchProcessingExecutor) {
-		this.jobRepository = jobRepository;
-		this.transactionManager = transactionManager;
-		this.properties = properties;
-		this.validationTasklet = validationTasklet;
-		this.referenceDataLoader = referenceDataLoader;
-		this.csvRecordReader = csvRecordReader;
-		this.csvRecordProcessor = csvRecordProcessor;
-		this.metricsWriter = metricsWriter;
-		this.processingStepListener = processingStepListener;
-		this.reconciliationTasklet = reconciliationTasklet;
-		this.finalizeBatchTasklet = finalizeBatchTasklet;
-		this.jobListener = jobListener;
-		this.batchLoggingListener = batchLoggingListener;
-		this.batchTracingListener = batchTracingListener;
-		this.batchProcessingExecutor = batchProcessingExecutor;
+	public BatchConfiguration(JobRepository repository, PlatformTransactionManager transactions,
+			InputValidationTasklet validate, ReferenceDataLoader reference, IndexAndCreatePartitionsTasklet index,
+			DistributedProcessingManagerTasklet manager, DistributedReconciliationTasklet reconcile,
+			DistributedFinalizeTasklet finalize, WeeklyBatchJobListener listener) {
+		this.repository = repository;
+		this.transactions = transactions;
+		this.validate = validate;
+		this.reference = reference;
+		this.index = index;
+		this.manager = manager;
+		this.reconcile = reconcile;
+		this.finalize = finalize;
+		this.listener = listener;
 	}
 
 	@Bean
-	Job weeklyCsvProcessingJob() {
-		return new JobBuilder(BatchLaunchService.JOB_NAME, this.jobRepository).start(validateInputStep())
-			.next(loadReferenceDataStep())
-			.next(processCsvStep())
-			.next(reconcileStep())
-			.next(finalizeStep())
-			.listener(this.jobListener)
-			.listener(this.batchLoggingListener)
-			.listener(this.batchTracingListener)
+	Job weeklyCsvCoordinatorJob() {
+		return new JobBuilder(BatchLaunchService.JOB_NAME, this.repository)
+			.start(step("validateFileStep", this.validate))
+			.next(step("loadReferenceDataStep", this.reference))
+			.next(step("indexAndCreatePartitionsStep", this.index))
+			.next(step("distributedProcessingManagerStep", this.manager))
+			.next(step("reconcileStep", this.reconcile))
+			.next(step("finalizeStep", this.finalize))
+			.listener(this.listener)
 			.build();
 	}
 
-	private org.springframework.batch.core.step.Step validateInputStep() {
-		return new StepBuilder("validateInputStep", this.jobRepository)
-			.tasklet(this.validationTasklet, this.transactionManager)
-			.build();
-	}
-
-	private org.springframework.batch.core.step.Step loadReferenceDataStep() {
-		return new StepBuilder("loadReferenceDataStep", this.jobRepository)
-			.tasklet(this.referenceDataLoader, this.transactionManager)
-			.build();
-	}
-
-	private org.springframework.batch.core.step.Step processCsvStep() {
-		BatchProperties.Processing processing = this.properties.processing();
-		BatchProperties.Retry retry = this.properties.retry();
-
-		return new StepBuilder("processCsvStep",
-				this.jobRepository).<dev.thehenrylabs.springbatchcronjob.domain.CustomerCsvRecord, dev.thehenrylabs.springbatchcronjob.domain.ProcessingResult>chunk(
-						processing.chunkSize())
-			.reader(this.csvRecordReader)
-			.processor(this.csvRecordProcessor)
-			.writer(this.metricsWriter)
-			.stream(this.csvRecordReader)
-			.stream(this.metricsWriter)
-			.listener(this.processingStepListener)
-			.taskExecutor(this.batchProcessingExecutor)
-			.faultTolerant()
-			.skipLimit(processing.skipLimit())
-			.skipPolicy(new org.springframework.batch.core.step.skip.LimitCheckingExceptionHierarchySkipPolicy(
-					new java.util.LinkedHashSet<>(java.util.List.of(CsvRecordParseException.class)),
-					processing.skipLimit()))
-			.retryLimit(retry.maxAttempts())
-			.retryPolicy(
-					new TransientDataAccessRetryPolicy(retry.initialBackoff(), retry.multiplier(), retry.maxBackoff()))
-			.build();
-	}
-
-	private org.springframework.batch.core.step.Step reconcileStep() {
-		return new StepBuilder("reconcileStep", this.jobRepository)
-			.tasklet(this.reconciliationTasklet, this.transactionManager)
-			.build();
-	}
-
-	private org.springframework.batch.core.step.Step finalizeStep() {
-		return new StepBuilder("finalizeStep", this.jobRepository)
-			.tasklet(this.finalizeBatchTasklet, this.transactionManager)
-			.build();
+	private Step step(String name, org.springframework.batch.core.step.tasklet.Tasklet tasklet) {
+		return new StepBuilder(name, this.repository).tasklet(tasklet, this.transactions).build();
 	}
 
 }

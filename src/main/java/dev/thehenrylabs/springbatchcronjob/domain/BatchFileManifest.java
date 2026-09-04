@@ -28,6 +28,8 @@ import org.springframework.data.relational.core.mapping.Table;
 public record BatchFileManifest(@Id Long id, LocalDate businessDate, String fileName, String fileUri,
 		long fileSizeBytes, String checksumSha256, ManifestStatus status, Instant discoveredAt,
 		Instant processingStartedAt, Instant processingFinishedAt, Long recordCount, Instant createdAt,
-		Instant updatedAt) {
+		Instant updatedAt, String logicalName, String fileGeneration, String headerHash, Long expectedRecordCount,
+		Instant indexStartedAt, Instant indexFinishedAt, Integer activeWorkerCountAtPlan,
+		Integer activeWorkerSlotsAtPlan) {
 
 }

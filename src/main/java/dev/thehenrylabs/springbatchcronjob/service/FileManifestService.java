@@ -62,7 +62,8 @@ public class FileManifestService {
 		}
 		Instant now = this.clock.instant();
 		BatchFileManifest discovery = new BatchFileManifest(null, businessDate, fileName, fileUri.toString(), sizeBytes,
-				checksumSha256, ManifestStatus.DISCOVERED, now, null, null, null, now, now);
+				checksumSha256, ManifestStatus.DISCOVERED, now, null, null, null, now, now, fileName, checksumSha256,
+				null, null, null, null, null, null);
 		try {
 			return new Registration(insertDiscovered(discovery), false);
 		}
@@ -94,6 +95,18 @@ public class FileManifestService {
 	@Transactional(propagation = Propagation.REQUIRES_NEW)
 	public BatchFileManifest transitionToReady(Long id) {
 		return guard(id, ManifestStatus.READY, transition(id, ManifestStatus.VALIDATING, ManifestStatus.READY));
+	}
+
+	@Transactional(propagation = Propagation.REQUIRES_NEW)
+	public BatchFileManifest transitionToIndexing(Long id) {
+		return guard(id, ManifestStatus.INDEXING, this.repository.transitionToIndexing(id,
+				ManifestStatus.VALIDATING.name(), ManifestStatus.INDEXING.name(), this.clock.instant()));
+	}
+
+	@Transactional(propagation = Propagation.REQUIRES_NEW)
+	public BatchFileManifest finishIndex(Long id, long expectedRecords) {
+		return guard(id, ManifestStatus.READY, this.repository.finishIndex(id, ManifestStatus.INDEXING.name(),
+				ManifestStatus.READY.name(), expectedRecords, this.clock.instant()));
 	}
 
 	@Transactional(propagation = Propagation.REQUIRES_NEW)

@@ -72,6 +72,9 @@ batch:
     misfire-policy: FIRE_ONCE_NOW
 
   input:
+    # classpath is development-only and is materialized to a seekable temporary file.
+    resource: ${BATCH_INPUT_RESOURCE:classpath:/batch/weekly.csv}
+    stability-window: ${BATCH_INPUT_STABILITY_WINDOW:10m}
     location: "/data/incoming"
     # Content-addressed destination for the immutable copy (SPEC 14); blank = no move.
     processing-location: "/data/processing"
@@ -106,3 +109,24 @@ batch:
     initial-backoff: 500ms
     multiplier: 2.0
     max-backoff: 5s
+
+  legacy:
+    enabled: ${BATCH_LEGACY_ENABLED:false}
+
+  distributed:
+    enabled: ${BATCH_DISTRIBUTED_ENABLED:true}
+    worker:
+      concurrency: ${BATCH_WORKER_CONCURRENCY:1}
+      heartbeat-interval: ${BATCH_WORKER_HEARTBEAT:5s}
+      active-timeout: ${BATCH_WORKER_ACTIVE_TIMEOUT:20s}
+      idle-poll-interval: ${BATCH_WORKER_IDLE_POLL_INTERVAL:1s}
+    partition:
+      partitions-per-active-worker: ${BATCH_PARTITIONS_PER_WORKER:8}
+      max-pods: ${BATCH_MAX_PODS:20}
+      scale-headroom-partitions-per-max-pod: ${BATCH_SCALE_HEADROOM:2}
+      max-partitions: ${BATCH_MAX_PARTITIONS:320}
+      min-partition-bytes: ${BATCH_MIN_PARTITION_BYTES:32MB}
+      lease-duration: ${BATCH_PARTITION_LEASE:30s}
+      lease-heartbeat: ${BATCH_PARTITION_LEASE_HEARTBEAT:10s}
+      max-attempts: ${BATCH_PARTITION_MAX_ATTEMPTS:3}
+    no-worker-timeout: ${BATCH_NO_WORKER_TIMEOUT:5m}

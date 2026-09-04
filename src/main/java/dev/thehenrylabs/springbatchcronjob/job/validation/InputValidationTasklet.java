@@ -63,7 +63,7 @@ public class InputValidationTasklet implements Tasklet {
 		try {
 			this.manifestService.transitionToValidating(id);
 			validate(manifest, fileUri);
-			BatchFileManifest ready = this.manifestService.transitionToReady(id);
+			BatchFileManifest ready = this.manifestService.transitionToIndexing(id);
 			log.info("Input validated businessDate={} file={} checksum={} manifestId={}", businessDate,
 					ready.fileName(), checksum, id);
 			return RepeatStatus.FINISHED;
@@ -105,6 +105,11 @@ public class InputValidationTasklet implements Tasklet {
 		}
 		// The processing copy must not have been modified after the checksum was taken.
 		java.time.Instant modified = lastModified(file);
+		if ("/data/incoming".equals(input.location())
+				&& modified.plus(input.stabilityWindow()).isAfter(java.time.Instant.now())) {
+			throw new InvalidInputFileException(
+					"Input has not satisfied stability window " + input.stabilityWindow() + ": " + file);
+		}
 		if (modified.isAfter(manifest.discoveredAt())) {
 			throw new InvalidInputFileException("Input file modified after discovery (" + manifest.discoveredAt()
 					+ " -> " + modified + "): " + file);

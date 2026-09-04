@@ -45,6 +45,20 @@ public interface BatchFileManifestRepository extends CrudRepository<BatchFileMan
 			""")
 	int transitionToProcessing(Long id, String from, String to, Instant at, Instant processingStartedAt);
 
+	@Modifying
+	@Query("""
+			UPDATE control.batch_file_manifest SET status = :to, index_started_at = :at, updated_at = :at
+			WHERE id = :id AND status = :from
+			""")
+	int transitionToIndexing(Long id, String from, String to, Instant at);
+
+	@Modifying
+	@Query("""
+			UPDATE control.batch_file_manifest SET status = :to, expected_record_count = :records,
+			index_finished_at = :at, updated_at = :at WHERE id = :id AND status = :from
+			""")
+	int finishIndex(Long id, String from, String to, Long records, Instant at);
+
 	/** Retry-safe transition from any of the supplied predecessor states. */
 	@Modifying
 	@Query("""

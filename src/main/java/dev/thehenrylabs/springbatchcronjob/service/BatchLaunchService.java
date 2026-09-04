@@ -25,6 +25,7 @@ import dev.thehenrylabs.springbatchcronjob.file.FileChecksumService;
 import dev.thehenrylabs.springbatchcronjob.file.ImmutableInputService;
 import dev.thehenrylabs.springbatchcronjob.file.InputFileResolver;
 import dev.thehenrylabs.springbatchcronjob.file.ResolvedInputFile;
+import dev.thehenrylabs.springbatchcronjob.file.SeekableInputResourceResolver;
 import io.micrometer.core.instrument.MeterRegistry;
 
 /**
@@ -39,13 +40,17 @@ import io.micrometer.core.instrument.MeterRegistry;
 @Service
 public class BatchLaunchService {
 
-	public static final String JOB_NAME = "weeklyCsvProcessingJob";
+	public static final String JOB_NAME = "weeklyCsvCoordinatorJob";
 
 	public static final String PARAM_BUSINESS_DATE = "businessDate";
 
 	public static final String PARAM_FILE_CHECKSUM = "fileChecksum";
 
 	public static final String PARAM_FILE_URI = "fileUri";
+
+	public static final String PARAM_FILE_LOGICAL_NAME = "fileLogicalName";
+
+	public static final String PARAM_FILE_GENERATION = "fileGeneration";
 
 	private static final Logger log = LoggerFactory.getLogger(BatchLaunchService.class);
 
@@ -65,9 +70,12 @@ public class BatchLaunchService {
 
 	private final BatchProperties properties;
 
+	private final SeekableInputResourceResolver seekableInput;
+
 	public BatchLaunchService(JobOperator jobOperator, JobRegistry jobRegistry, InputFileResolver inputFileResolver,
 			FileManifestService manifestService, FileChecksumService checksumService,
-			ImmutableInputService immutableInput, MeterRegistry meterRegistry, BatchProperties properties) {
+			ImmutableInputService immutableInput, MeterRegistry meterRegistry, BatchProperties properties,
+			SeekableInputResourceResolver seekableInput) {
 		this.jobOperator = jobOperator;
 		this.jobRegistry = jobRegistry;
 		this.inputFileResolver = inputFileResolver;
@@ -76,6 +84,7 @@ public class BatchLaunchService {
 		this.immutableInput = immutableInput;
 		this.meterRegistry = meterRegistry;
 		this.properties = properties;
+		this.seekableInput = seekableInput;
 	}
 
 	/** Outcome of a launch attempt (SPEC 39 layers). */
@@ -93,9 +102,17 @@ public class BatchLaunchService {
 	 * Resolve, register and launch the weekly job for a business date.
 	 */
 	public LaunchResult launchWeekly(LocalDate businessDate) {
-		ResolvedInputFile input = this.inputFileResolver.resolve(businessDate);
+		// The former directory convention remains a cutover-only compatibility path.
+		// New deployments use the explicit shared resource contract exclusively.
+		boolean legacyLocation = !"/data/incoming".equals(this.properties.input().location());
+		ResolvedInputFile input = legacyLocation ? this.inputFileResolver.resolve(businessDate)
+				: this.seekableInput.resolve();
 		String checksum = resolveChecksum(input);
-		ResolvedInputFile processing = this.immutableInput.installForProcessing(input, checksum);
+		// Production input is an immutable shared read-only generation. Moving/deleting
+		// it
+		// would make other pods observe different bytes, so process exactly this
+		// resource.
+		ResolvedInputFile processing = input;
 
 		FileManifestService.Registration registration = this.manifestService.registerDiscovered(businessDate,
 				processing.fileName(), processing.uri(), processing.sizeBytes(), checksum);
@@ -104,10 +121,15 @@ public class BatchLaunchService {
 			return new LaunchResult(Outcome.DUPLICATE_MANIFEST, Optional.empty(),
 					"file already registered (manifest row " + registration.manifest().id() + ")");
 		}
-		JobParameters parameters = new JobParametersBuilder().addString(PARAM_BUSINESS_DATE, businessDate.toString())
+		JobParametersBuilder parameterBuilder = new JobParametersBuilder()
+			.addString(PARAM_BUSINESS_DATE, businessDate.toString())
 			.addString(PARAM_FILE_CHECKSUM, checksum)
-			.addString(PARAM_FILE_URI, processing.uri().toString())
-			.toJobParameters();
+			.addString(PARAM_FILE_URI, processing.uri().toString());
+		if (!legacyLocation) {
+			parameterBuilder.addString(PARAM_FILE_LOGICAL_NAME, processing.fileName())
+				.addString(PARAM_FILE_GENERATION, checksum);
+		}
+		JobParameters parameters = parameterBuilder.toJobParameters();
 
 		log.info("Launching weekly CSV job businessDate={} file={} checksum={}", businessDate, input.fileName(),
 				checksum);

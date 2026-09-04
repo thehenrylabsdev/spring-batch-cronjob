@@ -27,9 +27,9 @@ public record BatchProperties(Schedule schedule, Input input, Processing process
 	}
 
 	/** Input file contract (SPEC 10, 13). */
-	public record Input(String location, String processingLocation, List<String> expectedHeader,
-			String expectedDelimiter, String expectedEncoding, String fileNamePattern, long minSizeBytes,
-			long maxSizeBytes, String expectedChecksum) {
+	public record Input(String resource, java.time.Duration stabilityWindow, String location, String processingLocation,
+			List<String> expectedHeader, String expectedDelimiter, String expectedEncoding, String fileNamePattern,
+			long minSizeBytes, long maxSizeBytes, String expectedChecksum) {
 	}
 
 	/** Chunk-oriented processing settings (SPEC 21, 28, 36). */
