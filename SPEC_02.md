@@ -1,5 +1,9 @@
 # SPEC_02.md — Distributed Weekly CSV Processing for a Horizontally Scaled Legacy Spring Boot Application
 
+> **Note:** This is the target specification. Statements about worker modification-time checks, graceful drain and
+> release (sections on shutdown and drain), and the reserved `lease-heartbeat` and `skip-limit` properties are not
+> implemented yet. The current state is listed in the README's "Implementation status" section.
+
 ## 1. Document Status
 
 - **Status:** Implementation Specification

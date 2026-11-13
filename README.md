@@ -78,6 +78,39 @@ Reconciliation       -> prove every logical record was covered
 - Workers are discovered through fresh PostgreSQL heartbeats, never by Kubernetes replica count.
 - Partitions are over-created and dynamically claimed, so fast pods steal more work and new pods can join mid-run.
 
+## Implementation status
+
+What the code does today, checked against the source. The specs (`SPEC.md`, `SPEC_02.md`) describe the target.
+
+Implemented:
+
+- Quartz clustered weekly trigger launches `weeklyCsvCoordinatorJob` once per occurrence.
+- Coordinator validates the input, loads reference data, runs one quote-aware UTF-8 indexing pass (SHA-256, header end,
+  record count, byte-range partitions) and persists them in `control.batch_partition`.
+- Each pod runs one worker polling loop per slot (`batch.distributed.worker.concurrency`, default `1`). Claims use
+  `FOR UPDATE SKIP LOCKED`, fenced by `lease_version`; expired leases are requeued.
+- Chunk checkpoints persist the byte offset and counters; a crashed partition resumes from its last committed checkpoint.
+- Input checks: size on workers; size and modification time on the coordinator before and after indexing.
+- `WeeklyJobRestartTests` runs one end-to-end distributed job over 10,000 generated records and asserts exact counts. It
+  does not inject a failure and does not restart a job.
+
+Planned, not yet implemented:
+
+- Graceful shutdown drain-and-release. Today a stopping pod marks itself `DRAINING` in `control.batch_worker`, but nothing
+  reads that flag, it does not release its partition after a checkpoint, and it keeps processing its in-flight chunk until the
+  JVM exits. Its unfinished range is recovered only by lease expiry.
+- Worker-side modification-time check. Workers compare file size only.
+- Failure-injection restart tests. The `RecordBoundaryFailureInjector` seam exists, but no test installs it.
+- `batch.processing.executor.*` drives `batchProcessingExecutor`, which exposes gauges, but no code submits work to it. The
+  distributed workers do not use it.
+
+Bound but not read by any code (reserved; changing them has no effect):
+
+- `batch.distributed.partition.lease-heartbeat`. Leases renew only at chunk checkpoints, so a single chunk slower than
+  `lease-duration` can lose its lease.
+- `batch.processing.partitioning.mode` and `grid-size`. Byte-range partitioning is always on.
+- `batch.processing.skip-limit`. No Spring Batch skip policy is attached; invalid rows are counted as `INVALID`.
+
 ## Stack
 
 | Concern | Technology |
@@ -142,7 +175,8 @@ weekly.csv.uploading -> write + close -> atomic rename -> weekly.csv
 ```
 
 The final file must not change while Monday processing runs. The coordinator checks size and modification time before
-and after indexing; workers recheck input metadata when beginning and completing work.
+and after indexing. Workers recheck the file size only when beginning and completing work; a worker-side modification
+time check is planned (see Implementation status).
 
 ## Important configuration
 
@@ -173,7 +207,7 @@ batch:
       max-partitions: 320
       min-partition-bytes: 32MB
       lease-duration: 30s
-      lease-heartbeat: 10s
+      lease-heartbeat: 10s         # reserved: bound but not read (see Implementation status)
       max-attempts: 3
     no-worker-timeout: 5m
 ```
@@ -190,7 +224,8 @@ memory, PostgreSQL connections, and the worker-slot advertisement together.
 5. It persists contiguous `control.batch_partition` rows in `READY` state.
 6. Any healthy worker claims the next row with `FOR UPDATE SKIP LOCKED`.
 7. The worker runs chunked processing, persists the safe next byte offset and aggregate counters, and renews its lease.
-8. A graceful terminating pod stops claiming new work and releases an unfinished partition after a checkpoint.
+8. Planned: a gracefully terminating pod stops claiming new work and releases an unfinished partition after a checkpoint.
+   Today it does not release; its partition is reclaimed after lease expiry.
 9. An abruptly lost pod stops heartbeating; its lease expires and another pod resumes from the last committed checkpoint.
 10. The manager and reconciliation steps require all ranges to complete with matching expected counts before the manifest
     becomes `COMPLETED`.

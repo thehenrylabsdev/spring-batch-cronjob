@@ -1,7 +1,9 @@
 # ADR-0004: Bounded platform-thread executor
 
 ## Status
-Accepted
+Accepted. Implementation note: `batchProcessingExecutor` is defined and exposes gauges, but no code submits chunks to
+it. Distributed workers run one partition per worker slot (`batch.distributed.worker.concurrency`, default 1), so the
+core/max=8 values below are not in effect. See README "Implementation status".
 
 ## Decision
 A dedicated `batchProcessingExecutor` (platform threads, core=max=8, bounded queue 16,

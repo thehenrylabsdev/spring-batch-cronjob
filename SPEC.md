@@ -1,5 +1,9 @@
 # SPEC.md — High-Throughput Weekly CSV Batch Processing Platform
 
+> **Note:** This is the target specification. Statements about graceful drain, failure-injection restart tests, and
+> the reserved partitioning and skip properties are not implemented yet. The current state is listed in the
+> README's "Implementation status" section.
+
 ## 1. Document Status
 
 - **Status:** Implementation Specification

@@ -45,9 +45,10 @@ SELECT job_execution_id FROM batch.batch_job_execution WHERE status='FAILED'
 ORDER BY job_execution_id DESC LIMIT 1;
 ```
 
-Then trigger a restart — the application restart path is:
-`BatchLaunchService.restart` equivalent via JobOperator (kubectl exec + actuator is not
-provided; use the launcher service or `JobOperator.restart`). Preconditions:
+There is no operator-facing restart command. `BatchLaunchService.launchWeekly` is called only by the Quartz job,
+and no actuator endpoint or CLI exists. Relaunching the same business date with the identical file reuses the same
+JobParameters, which is the intended restart path, but reaching it requires a code change until an entry point is
+added. Preconditions:
 
 - the immutable processing copy still exists at the manifest `file_uri`,
 - the manifest status is FAILED (it is re-tried automatically on restart),
@@ -89,17 +90,18 @@ SELECT * FROM quartz.qrtz_scheduler_state; -- cluster members
 
 ## Investigate slow throughput
 
-- `batch_records_per_second` gauge; compare with docs/benchmarks/defaults.md baseline.
-- `batch_chunk_duration_seconds`, `batch_reader_latency_seconds` histograms.
+- `batch_records_per_second` gauge; compare with docs/benchmarks/defaults.md baseline. It is updated only by the legacy
+  `ClassificationMetricsWriter`, which the distributed job does not run, so expect it to stay at zero.
+- `batch_chunk_duration_seconds`, `batch_reader_latency_seconds`: defined in `BatchMetrics` but never recorded.
+  Use `batch_records_*` counters and the job metrics for now.
 - JFR + GC logs for allocation pressure (SPEC 63). Check the skip ratio first:
   `batch_records_invalid_total` — a corrupted run mixes INVALID rows into throughput.
 
 ## Verify executor saturation
 
-- `batch_executor_active_threads`, `batch_executor_queue_depth`:
-  sustained queue depth ≈ queue-capacity for minutes = workers cannot keep up →
-  check processor cost or DB checkpoint latency; do NOT increase threads without a
-  benchmark (SPEC 62).
+- `batch_executor_active_threads`, `batch_executor_queue_depth`: no code submits work to this executor today, so
+  these gauges stay flat and do not indicate worker saturation. For worker saturation, check
+  `control.batch_worker` (BUSY vs IDLE) and partition progress instead.
 
 ## Verify PostgreSQL health
 
@@ -109,9 +111,11 @@ SELECT * FROM quartz.qrtz_scheduler_state; -- cluster members
 
 ## Shutdown notes (SPEC 53)
 
-- `server.shutdown: graceful`, `spring.lifecycle.timeout-per-shutdown-phase: 90s` and
-  `terminationGracePeriodSeconds` must exceed worst-case chunk time; the SIGTERM path
-  lets the current checkpoint transaction finish, then Spring Batch state persists.
+- `server.shutdown: graceful` and `spring.lifecycle.timeout-per-shutdown-phase: 90s` are set. Current behaviour on
+  SIGTERM: the worker is marked `DRAINING` then `STOPPED`, and its in-flight chunk is not interrupted or released. Only
+  chunks already committed survive; the partition is reclaimed after lease expiry.
+- Planned: drain-and-release, where a terminating pod finishes its current checkpoint and releases the partition.
+  Until then, do not rely on it.
 - Rolling deploys may not start a duplicate instance: protected by Quartz clustering +
   `@DisallowConcurrentExecution`, deterministic job parameters, manifest uniqueness —
-  verified by `QuartzClusterFiringTests` and restart tests.
+  verified by `QuartzClusterFiringTests`. There are no failure-injection restart tests yet.
