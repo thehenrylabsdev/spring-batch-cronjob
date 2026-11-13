@@ -14,8 +14,9 @@ local development hardware — roughly 200x inside the 60-minute acceptance SLA.
 single-reader path is not the bottleneck; processing workers are not starved.
 
 ## Consequences
-- No partitioning code ships beyond the property seam
-  (`batch.processing.partitioning.mode`, `grid-size`; SHARDS resolves via
-  `MultiResourcePartitioner`-style structure when upstream shards appear).
+- Byte-range partitioning does ship, in the distributed plane (ADR-0010, ADR-0011). That is more than the
+  single-reader Level 1 this ADR describes, and the benchmark gate it calls for is not documented in the repository.
+- The properties `batch.processing.partitioning.mode` and `grid-size` are bound but not read by any code. SHARDS
+  (`MultiResourcePartitioner`-style) is not implemented.
 - Remote partitioning is explicitly premature until production measurements contradict
   the baseline (SPEC 9: "measure and design carefully").

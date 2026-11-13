@@ -19,7 +19,10 @@ FROM control.batch_partition WHERE manifest_id = :manifest_id ORDER BY partition
 ```
 
 Expired `CLAIMED` or `RUNNING` leases are automatically requeued. Do not manually change a live partition owner.
-For graceful scale-down, reduce replicas and wait for `DRAINING` workers to release their current range. To stop new
+Scale-down: reducing replicas does not release in-flight ranges yet (drain-and-release is planned). A stopped pod's
+`CLAIMED`/`RUNNING` range becomes `RETRYABLE` only after `lease_expires_at` passes (`batch.distributed.partition.lease-duration`,
+default 30s), and another worker then resumes it from the last committed checkpoint. A `DRAINING` status is written to
+`control.batch_worker`, but nothing acts on it yet. To stop new
 runs set `BATCH_SCHEDULE_ENABLED=false`; retain `batch`, `control`, and `quartz` schemas during rollback. Never
 enable the legacy scheduler while a distributed manifest is `INDEXING`, `READY`, or `PROCESSING`.
 

@@ -55,8 +55,8 @@ class QuartzClusterFiringTests {
 
 		Scheduler first = startClusteredScheduler("cluster-node-a");
 		startClusteredScheduler("cluster-node-b");
+		JobKey jobKey = JobKey.jobKey("clusterTestJob", "clusterTest");
 		try {
-			JobKey jobKey = JobKey.jobKey("clusterTestJob", "clusterTest");
 			first.scheduleJob(
 					org.quartz.JobBuilder.newJob(CountingJob.class).withIdentity(jobKey).storeDurably(true).build(),
 					TriggerBuilder.newTrigger()
@@ -71,6 +71,9 @@ class QuartzClusterFiringTests {
 			assertThat(CountingJob.EXECUTIONS.get()).isEqualTo(1);
 		}
 		finally {
+			// The job is durable and the database is shared with other test classes:
+			// remove it.
+			first.deleteJob(jobKey);
 			for (org.springframework.scheduling.quartz.SchedulerFactoryBean factory : this.schedulersToShutdown) {
 				factory.destroy();
 			}

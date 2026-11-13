@@ -38,7 +38,9 @@ class WeeklyCsvScheduleFactoryTests {
 		Trigger trigger = this.scheduler.getTrigger(WeeklyCsvScheduleFactory.triggerKey());
 		assertThat(trigger).isInstanceOf(CronTrigger.class);
 
-		Integer jobs = this.jdbcTemplate.queryForObject("SELECT count(*) FROM quartz.qrtz_job_details", Integer.class);
+		Integer jobs = this.jdbcTemplate.queryForObject(
+				"SELECT count(*) FROM quartz.qrtz_job_details WHERE job_group = ?", Integer.class,
+				WeeklyCsvQuartzJob.JOB_GROUP);
 		assertThat(jobs).isEqualTo(1);
 	}
 
@@ -53,9 +55,15 @@ class WeeklyCsvScheduleFactoryTests {
 	@Test
 	void registrationIsIdempotent() throws Exception {
 		// ApplicationRunner already ran at startup; a second run must not duplicate rows.
+		// Counts are scoped to this job's group: other test classes share the database
+		// and store their own jobs.
 		this.factory.run(null);
-		Integer jobs = this.jdbcTemplate.queryForObject("SELECT count(*) FROM quartz.qrtz_job_details", Integer.class);
-		Integer triggers = this.jdbcTemplate.queryForObject("SELECT count(*) FROM quartz.qrtz_triggers", Integer.class);
+		Integer jobs = this.jdbcTemplate.queryForObject(
+				"SELECT count(*) FROM quartz.qrtz_job_details WHERE job_group = ?", Integer.class,
+				WeeklyCsvQuartzJob.JOB_GROUP);
+		Integer triggers = this.jdbcTemplate.queryForObject(
+				"SELECT count(*) FROM quartz.qrtz_triggers WHERE job_group = ?", Integer.class,
+				WeeklyCsvQuartzJob.JOB_GROUP);
 		assertThat(jobs).isEqualTo(1);
 		assertThat(triggers).isEqualTo(1);
 	}
